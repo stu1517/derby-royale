@@ -64,7 +64,8 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 3. 點擊奔跑
+    /*
+    // 3. 點擊奔跑    
     socket.on('clickRun', () => {
         if (!raceState.started) return;
         const player = players.get(socket.id);
@@ -99,6 +100,45 @@ io.on('connection', (socket) => {
             }
         }
     });
+    */
+
+    // 3. 點擊奔跑 (修改版)
+    socket.on('clickRun', () => {
+        if (!raceState.started) return;
+        const player = players.get(socket.id);
+        if (!player || player.horseId === -1) return;
+
+        const hIndex = player.horseId;
+        const horse = raceState.horses[hIndex];
+
+        // 如果這匹馬還沒跑完，增加分數
+        if (!horse.finished) {
+            horse.score++;
+            
+            // 檢查是否到達終點
+            if (horse.score >= TARGET_CLICKS) {
+                horse.score = TARGET_CLICKS;
+                horse.finished = true;
+                horse.finishTime = Date.now() - raceState.startTime;
+                
+                // 設定為第 1 名
+                horse.rank = 1; 
+
+                // 廣播冠軍產生
+                io.emit('horseFinished', { 
+                    id: hIndex, 
+                    rank: 1, 
+                    time: (horse.finishTime / 1000).toFixed(2) 
+                });
+
+                // === 關鍵修改：只要有一匹馬跑完，直接結束遊戲 ===
+                endGame();
+            }
+        }
+    });
+
+
+
 
     // --- 管理員指令 ---
     socket.on('adminAction', (data) => {
@@ -144,6 +184,7 @@ function startGame() {
     io.emit('gameStart');
 }
 
+/*
 function endGame() {
     raceState.started = false;
     
@@ -156,6 +197,45 @@ function endGame() {
 
     io.emit('gameOver', {
         horses: raceState.horses, // 包含所有成績
+        winnerName: winnerHorse.name,
+        luckyPlayers: winners
+    });
+}
+    */
+
+// 修改後的結束遊戲邏輯
+function endGame() {
+    raceState.started = false;
+    
+    // 1. 結算排名
+    // 因為只有一匹馬跑完(冠軍)，我們需要手動計算其他馬的名次(2~5名)
+    // 邏輯：已完成的排前面，未完成的依照分數(score)由高到低排
+    
+    // 建立一個暫存陣列來排序，避免打亂原始 id 順序
+    let sortedResult = [...raceState.horses].sort((a, b) => {
+        if (a.finished && !b.finished) return -1; // a 排前
+        if (!a.finished && b.finished) return 1;  // b 排前
+        return b.score - a.score; // 分數高的排前
+    });
+
+    // 將排名寫回原始資料
+    sortedResult.forEach((h, index) => {
+        // 透過 id 找到原始物件並寫入 rank
+        const originalHorse = raceState.horses.find(oh => oh.id === h.id);
+        originalHorse.rank = index + 1;
+    });
+
+    // 2. 找出冠軍 (Rank 1)
+    const winnerHorse = raceState.horses.find(h => h.rank === 1);
+    
+    // 3. 找出中獎玩家
+    const winners = [];
+    players.forEach(p => {
+        if (p.horseId === winnerHorse.id) winners.push(p.name);
+    });
+
+    io.emit('gameOver', {
+        horses: raceState.horses, // 包含所有成績與計算好的排名
         winnerName: winnerHorse.name,
         luckyPlayers: winners
     });

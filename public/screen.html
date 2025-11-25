@@ -134,6 +134,9 @@
         });
 
         socket.on('gameOver', (data) => {
+            // === 新增：讓所有馬停止奔跑動畫 ===
+            document.querySelectorAll('.horse-wrap').forEach(el => el.classList.remove('running'));
+
             setTimeout(() => {
                 showResults(data);
                 fireConfetti();
