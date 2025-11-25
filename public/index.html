@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>尾牙賽馬下注</title>
+    <style>
+        body { margin: 0; background: #222; color: #fff; font-family: "Microsoft JhengHei", sans-serif; text-align: center; touch-action: manipulation; }
+        .page { display: none; height: 100vh; flex-direction: column; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box; }
+        
+        /* 登入 */
+        input { padding: 15px; font-size: 1.2rem; border-radius: 10px; width: 80%; margin-bottom: 20px; text-align: center; }
+        
+        /* 列表 */
+        .horse-card { background: #333; width: 100%; border-radius: 10px; padding: 15px; margin-bottom: 15px; text-align: left; border: 2px solid transparent; cursor: pointer; transition: 0.2s; display: flex; align-items: center; }
+        .horse-card:active { transform: scale(0.98); background: #444; }
+        .h-icon { font-size: 2.5rem; margin-right: 15px; }
+        .h-info h3 { margin: 0; color: #f1c40f; }
+        .h-info p { margin: 5px 0 0; font-size: 0.9rem; color: #ccc; }
+        
+        /* 按鈕 */
+        .btn-main { width: 100%; padding: 15px; font-size: 1.2rem; background: #2ecc71; border: none; color: white; border-radius: 10px; font-weight: bold; }
+        
+        /* 遊戲大按鈕 */
+        #runBtn { width: 250px; height: 250px; border-radius: 50%; border: 10px solid #fff; background: #e74c3c; color: white; font-size: 3rem; font-weight: 900; box-shadow: 0 10px 0 #c0392b; transition: 0.05s; }
+        #runBtn:active { transform: scale(0.95) translateY(10px); box-shadow: 0 0 0 #c0392b; }
+        #runBtn:disabled { background: #7f8c8d; border-color: #95a5a6; box-shadow: none; cursor: not-allowed; }
+
+        .status-text { font-size: 1.5rem; margin-bottom: 20px; color: #3498db; }
+    </style>
+</head>
+<body>
+
+    <div id="loginPage" class="page" style="display: flex;">
+        <h1>🎪 尾牙大賽馬 🎪</h1>
+        <p>請輸入大名入場</p>
+        <input type="text" id="username" placeholder="真實姓名">
+        <button class="btn-main" onclick="login()">進入馬場</button>
+    </div>
+
+    <div id="selectPage" class="page" style="display: block; overflow-y: auto; justify-content: flex-start; padding-top: 40px;">
+        <h2>請選擇您的戰馬</h2>
+        <div id="horseList"></div>
+    </div>
+
+    <div id="waitPage" class="page">
+        <h2>您選擇了：</h2>
+        <h1 id="myHorseName" style="color:#f1c40f; font-size: 3rem;"></h1>
+        <div class="status-text">等待比賽開始...</div>
+        <p>暖身手指，準備連點！</p>
+    </div>
+
+    <div id="gamePage" class="page">
+        <div class="status-text">瘋狂點擊！</div>
+        <button id="runBtn" onclick="sendClick()">奔跑吧!</button>
+    </div>
+
+    <div id="resultPage" class="page">
+        <h1 id="resultTitle">比賽結束</h1>
+        <p>請看大螢幕公佈成績</p>
+        <button class="btn-main" onclick="window.location.reload()">回到首頁</button>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let myHorseData = null;
+
+        function showPage(id) {
+            document.querySelectorAll('.page').forEach(p => p.style.display = 'none');
+            const page = document.getElementById(id);
+            page.style.display = (id === 'selectPage') ? 'block' : 'flex';
+        }
+
+        function login() {
+            const name = document.getElementById('username').value.trim();
+            if (!name) return alert("請輸入名字");
+            socket.emit('login', name);
+        }
+
+        socket.on('loginSuccess', (horseConfig) => {
+            const list = document.getElementById('horseList');
+            list.innerHTML = '';
+            horseConfig.forEach(h => {
+                const div = document.createElement('div');
+                div.className = 'horse-card';
+                div.onclick = () => selectHorse(h.id);
+                div.innerHTML = `
+                    <div class="h-icon">${h.icon}</div>
+                    <div class="h-info">
+                        <h3>${h.name}</h3>
+                        <p>${h.desc}</p>
+                    </div>
+                `;
+                list.appendChild(div);
+            });
+            showPage('selectPage');
+        });
+
+        function selectHorse(id) {
+            if(confirm("確定要下注這匹馬嗎？選定離手！")) {
+                socket.emit('selectHorse', id);
+            }
+        }
+
+        socket.on('waitingForStart', (horse) => {
+            myHorseData = horse;
+            document.getElementById('myHorseName').innerText = horse.name;
+            showPage('waitPage');
+        });
+
+        socket.on('gameStart', () => {
+            showPage('gamePage');
+            document.getElementById('runBtn').disabled = false;
+            // 手機震動提示
+            if(navigator.vibrate) navigator.vibrate(200);
+        });
+
+        function sendClick() {
+            socket.emit('clickRun');
+            if(navigator.vibrate) navigator.vibrate(30); // 輕微觸覺回饋
+        }
+
+        socket.on('horseFinished', (data) => {
+            if (myHorseData && data.id === myHorseData.id) {
+                document.getElementById('runBtn').disabled = true;
+                document.getElementById('runBtn').innerText = "抵達終點";
+                document.getElementById('runBtn').style.background = "#2ecc71";
+            }
+        });
+
+        socket.on('gameOver', () => {
+            showPage('resultPage');
+        });
+
+        socket.on('resetGame', () => {
+            window.location.reload();
+        });
+
+        // 防止手機雙擊放大
+        document.addEventListener('dblclick', function(event) {
+            event.preventDefault();
+        }, { passive: false });
+    </script>
+</body>
+</html>

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>Derby Royale - 尾牙狂奔</title>
+    <style>
+        body { margin: 0; background: #2c3e50; font-family: "Microsoft JhengHei", sans-serif; overflow: hidden; color: white; }
+        
+        #header { height: 10vh; background: #34495e; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); z-index: 10; position: relative; }
+        h1 { margin: 0; font-style: italic; color: #f1c40f; text-shadow: 2px 2px #000; }
+        
+        /* 賽道區域 */
+        #racetrack { height: 90vh; display: flex; flex-direction: column; position: relative; background-image: repeating-linear-gradient(90deg, #2c3e50 0px, #2c3e50 98px, #34495e 100px); }
+        
+        .lane { flex: 1; border-bottom: 2px dashed rgba(255,255,255,0.2); position: relative; display: flex; align-items: center; }
+        .lane:nth-child(even) { background: rgba(0,0,0,0.1); }
+        
+        .horse-info { width: 150px; padding-left: 10px; z-index: 2; font-weight: bold; font-size: 1.2rem; text-shadow: 1px 1px 2px black; }
+        
+        .track-area { flex: 1; position: relative; height: 100%; margin-right: 50px; }
+        
+        /* 終點線 */
+        #finish-line { position: absolute; right: 80px; top: 0; bottom: 0; width: 10px; background-image: linear-gradient(45deg, #fff 25%, #000 25%, #000 50%, #fff 50%, #fff 75%, #000 75%, #000 100%); background-size: 20px 20px; z-index: 1; }
+        .finish-flag { position: absolute; right: 70px; top: 10px; font-size: 2rem; }
+
+        /* 馬匹本體 */
+        .horse-wrap { position: absolute; left: 0; top: 50%; transform: translateY(-50%); transition: left 0.1s linear; font-size: 4rem; z-index: 10; display: flex; flex-direction: column; align-items: center; }
+        .horse-wrap.running { animation: bounce 0.5s infinite; }
+        .horse-name-tag { font-size: 1rem; background: rgba(0,0,0,0.6); padding: 2px 8px; border-radius: 10px; white-space: nowrap; margin-top: -10px; }
+        
+        /* 結算畫面 */
+        #result-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 100; display: none; flex-direction: column; align-items: center; justify-content: center; }
+        #winner-display { font-size: 5rem; color: #f1c40f; margin-bottom: 20px; animation: popIn 0.8s; }
+        .rank-table { width: 80%; background: #fff; color: #333; border-radius: 10px; padding: 20px; }
+        .rank-row { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid #ddd; font-size: 1.5rem; }
+        .lucky-list { margin-top: 20px; color: #2ecc71; font-size: 1.5rem; text-align: center; max-height: 20vh; overflow-y: auto; }
+
+        @keyframes bounce { 0%, 100% { transform: translateY(-55%); } 50% { transform: translateY(-45%); } }
+        @keyframes popIn { 0% { transform: scale(0); } 80% { transform: scale(1.1); } 100% { transform: scale(1); } }
+
+        /* 設定按鈕 */
+        .admin-controls { position: absolute; top: 20px; right: 20px; display: flex; gap: 10px; }
+        .btn { padding: 5px 15px; background: #3498db; border: none; color: white; cursor: pointer; font-size: 1rem; border-radius: 5px; }
+        .btn-start { background: #e74c3c; }
+        .btn-reset { background: #95a5a6; }
+    </style>
+</head>
+<body>
+
+    <div id="header">
+        <h1>Derby Royale 尾牙狂奔 🐎</h1>
+        <div class="admin-controls">
+            <input type="number" id="targetInput" value="1000" style="width: 80px; text-align: center;">
+            <button class="btn" onclick="setTarget()">設定目標</button>
+            <button class="btn btn-start" onclick="startGame()">開始 (S)</button>
+            <button class="btn btn-reset" onclick="resetGame()">重置 (R)</button>
+        </div>
+    </div>
+
+    <div id="racetrack">
+        <div id="finish-line"></div>
+        <div class="finish-flag">🏁</div>
+        </div>
+
+    <div id="result-modal">
+        <div id="winner-display">🏆 冠軍：???</div>
+        <div class="rank-table" id="rankTable">
+            </div>
+        <div style="margin-top: 20px; color: #ccc;">慧眼獨具的玩家們：</div>
+        <div class="lucky-list" id="luckyList"></div>
+        <button class="btn btn-reset" style="margin-top: 30px; font-size: 2rem;" onclick="resetGame()">關閉並重置</button>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <script>
+        const socket = io();
+        const trackContainer = document.getElementById('racetrack');
+        
+        // 預先建立跑道
+        const horses = [
+            {id:0, icon:'🐹', name:'薪水小偷'},
+            {id:1, icon:'🧟', name:'爆肝代碼'},
+            {id:2, icon:'🍳', name:'甩鍋大王'},
+            {id:3, icon:'🏃', name:'準時下班'},
+            {id:4, icon:'💰', name:'年終加倍'}
+        ];
+
+        function initTracks() {
+            trackContainer.innerHTML = '<div id="finish-line"></div><div class="finish-flag">🏁</div>';
+            horses.forEach(h => {
+                const lane = document.createElement('div');
+                lane.className = 'lane';
+                lane.innerHTML = `
+                    <div class="horse-info">${h.id+1}. ${h.name}</div>
+                    <div class="track-area">
+                        <div class="horse-wrap" id="horse-${h.id}">
+                            <div class="horse-icon">${h.icon}</div>
+                            <div class="horse-name-tag">${h.name}</div>
+                        </div>
+                    </div>
+                `;
+                trackContainer.appendChild(lane);
+            });
+        }
+        initTracks();
+
+        socket.on('updateProgress', (data) => {
+            data.forEach(item => {
+                const el = document.getElementById(`horse-${item.id}`);
+                // 限制最大 100%
+                let pct = item.percent > 100 ? 100 : item.percent;
+                el.style.left = `${pct}%`;
+            });
+        });
+
+        socket.on('gameStart', () => {
+            document.querySelectorAll('.horse-wrap').forEach(el => el.classList.add('running'));
+            document.getElementById('result-modal').style.display = 'none';
+        });
+
+        socket.on('horseFinished', (data) => {
+            const el = document.getElementById(`horse-${data.id}`);
+            el.classList.remove('running'); // 停止跳動
+            // 可以在馬旁邊顯示名次
+            const badge = document.createElement('span');
+            badge.innerText = ` #${data.rank} (${data.time}s)`;
+            badge.style.background = '#f1c40f';
+            badge.style.color = '#000';
+            badge.style.borderRadius = '5px';
+            badge.style.fontSize = '1rem';
+            badge.style.marginLeft = '10px';
+            el.appendChild(badge);
+        });
+
+        socket.on('gameOver', (data) => {
+            setTimeout(() => {
+                showResults(data);
+                fireConfetti();
+            }, 1000);
+        });
+
+        socket.on('resetGame', () => {
+            initTracks(); // 重繪
+            document.getElementById('result-modal').style.display = 'none';
+        });
+
+        function showResults(data) {
+            const modal = document.getElementById('result-modal');
+            modal.style.display = 'flex';
+            
+            document.getElementById('winner-display').innerText = `🏆 冠軍：${data.winnerName}`;
+            
+            // 排序排名
+            const sortedHorses = data.horses.sort((a,b) => a.rank - b.rank);
+            
+            document.getElementById('rankTable').innerHTML = sortedHorses.map(h => `
+                <div class="rank-row">
+                    <span>#${h.rank} ${h.icon} ${h.name}</span>
+                    <span>${h.finishTime ? (h.finishTime/1000).toFixed(2)+'秒' : '未完成'}</span>
+                </div>
+            `).join('');
+
+            document.getElementById('luckyList').innerText = data.luckyPlayers.join('、 ');
+        }
+
+        // Admin Actions
+        function startGame() { socket.emit('adminAction', {action:'start'}); }
+        function resetGame() { socket.emit('adminAction', {action:'reset'}); }
+        function setTarget() { 
+            const val = document.getElementById('targetInput').value;
+            socket.emit('adminAction', {action:'setTarget', value: val}); 
+        }
+
+        // Keyboard Shortcuts
+        window.addEventListener('keydown', (e) => {
+            if(e.key.toLowerCase() === 's') startGame();
+            if(e.key.toLowerCase() === 'r') resetGame();
+        });
+
+        function fireConfetti() {
+            var duration = 3000;
+            var end = Date.now() + duration;
+            (function frame() {
+                confetti({ particleCount: 5, angle: 60, spread: 55, origin: { x: 0 } });
+                confetti({ particleCount: 5, angle: 120, spread: 55, origin: { x: 1 } });
+                if (Date.now() < end) requestAnimationFrame(frame);
+            }());
+        }
+    </script>
+</body>
+</html>
